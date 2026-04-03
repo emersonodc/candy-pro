@@ -4,7 +4,6 @@ const BASE = ["🍬", "🍭", "🍫", "🍪", "🧁"];
 const SWAP_MS = 180;
 const CLEAR_MS = 240;
 const STORAGE_KEY = "candy-pro-save";
-const MAX_SIZE = 8;
 
 function getBoardSize(level) {
   if (level >= 10) return 8;
@@ -701,16 +700,17 @@ export default function CandyGame() {
         chain += 1;
         const expanded = new Set(matchedPositions);
 
-        bonusSpecials.forEach((bonus) => {
+        for (const bonus of bonusSpecials) {
+          const boardLength = working.length;
           if (bonus.special === "line") {
-            for (let c = 0; c < working.length; c++) expanded.add(`${bonus.row}-${c}`);
-            for (let r = 0; r < working.length; r++) expanded.add(`${r}-${bonus.col}`);
+            for (let c = 0; c < boardLength; c++) expanded.add(`${bonus.row}-${c}`);
+            for (let r = 0; r < boardLength; r++) expanded.add(`${r}-${bonus.col}`);
           }
           if (bonus.special === "cross") {
-            for (let c = 0; c < working.length; c++) expanded.add(`${bonus.row}-${c}`);
-            for (let r = 0; r < working.length; r++) expanded.add(`${r}-${bonus.col}`);
+            for (let c = 0; c < boardLength; c++) expanded.add(`${bonus.row}-${c}`);
+            for (let r = 0; r < boardLength; r++) expanded.add(`${r}-${bonus.col}`);
           }
-        });
+        }
 
         setMatchedCells(new Set(expanded));
         soundRef.current?.play("match");
