@@ -1,10 +1,28 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-const SIZE = 8;
 const BASE = ["🍬", "🍭", "🍫", "🍪", "🧁"];
 const SWAP_MS = 180;
 const CLEAR_MS = 240;
 const STORAGE_KEY = "candy-pro-save";
+const MAX_SIZE = 8;
+
+function getBoardSize(level) {
+  if (level >= 10) return 8;
+  if (level >= 6) return 7;
+  if (level >= 3) return 6;
+  return 5;
+}
+
+function getMovesByLevel(level) {
+  return Math.max(12, 20 - Math.floor(level / 2));
+}
+
+function getGoalByLevel(level, size) {
+  const baseGoal = 180;
+  const levelFactor = level * 110;
+  const boardFactor = (size - 5) * 140;
+  return baseGoal + levelFactor + boardFactor;
+}
 
 function randomCandy() {
   return BASE[Math.floor(Math.random() * BASE.length)];
@@ -23,10 +41,11 @@ function loadGame() {
   }
 }
 
-function makeCandy(symbol, row, col) {
+function makeCandy(symbol, row, col, special = null) {
   return {
     id: `${Date.now()}-${Math.random()}-${row}-${col}`,
     symbol,
+    special,
   };
 }
 
@@ -35,8 +54,9 @@ function cloneBoard(board) {
 }
 
 function hasMatch(board) {
-  for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c < SIZE - 2; c++) {
+  const size = board.length;
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size - 2; c++) {
       const a = board[r][c]?.symbol;
       const b = board[r][c + 1]?.symbol;
       const d = board[r][c + 2]?.symbol;
@@ -44,8 +64,8 @@ function hasMatch(board) {
     }
   }
 
-  for (let c = 0; c < SIZE; c++) {
-    for (let r = 0; r < SIZE - 2; r++) {
+  for (let c = 0; c < size; c++) {
+    for (let r = 0; r < size - 2; r++) {
       const a = board[r][c]?.symbol;
       const b = board[r + 1][c]?.symbol;
       const d = board[r + 2][c]?.symbol;
@@ -56,26 +76,28 @@ function hasMatch(board) {
   return false;
 }
 
-function createBoard() {
+function createBoard(size) {
   let board;
   do {
-    board = Array.from({ length: SIZE }, (_, row) =>
-      Array.from({ length: SIZE }, (_, col) => makeCandy(randomCandy(), row, col))
+    board = Array.from({ length: size }, (_, row) =>
+      Array.from({ length: size }, (_, col) => makeCandy(randomCandy(), row, col))
     );
   } while (hasMatch(board));
   return board;
 }
 
 function getMatches(board) {
+  const size = board.length;
   const matchedPositions = new Set();
+  const bonusSpecials = [];
   let total = 0;
 
-  for (let r = 0; r < SIZE; r++) {
+  for (let r = 0; r < size; r++) {
     let count = 1;
-    for (let c = 1; c <= SIZE; c++) {
-      const current = c < SIZE ? board[r][c]?.symbol : null;
+    for (let c = 1; c <= size; c++) {
+      const current = c < size ? board[r][c]?.symbol : null;
       const prev = board[r][c - 1]?.symbol;
-      if (c < SIZE && current && current === prev) {
+      if (c < size && current && current === prev) {
         count++;
       } else {
         if (count >= 3 && prev) {
@@ -83,18 +105,26 @@ function getMatches(board) {
             matchedPositions.add(`${r}-${c - 1 - k}`);
           }
           total += count;
+          if (count >= 4) {
+            bonusSpecials.push({
+              row: r,
+              col: c - 1,
+              symbol: prev,
+              special: count >= 5 ? "cross" : "line",
+            });
+          }
         }
         count = 1;
       }
     }
   }
 
-  for (let c = 0; c < SIZE; c++) {
+  for (let c = 0; c < size; c++) {
     let count = 1;
-    for (let r = 1; r <= SIZE; r++) {
-      const current = r < SIZE ? board[r][c]?.symbol : null;
+    for (let r = 1; r <= size; r++) {
+      const current = r < size ? board[r][c]?.symbol : null;
       const prev = board[r - 1][c]?.symbol;
-      if (r < SIZE && current && current === prev) {
+      if (r < size && current && current === prev) {
         count++;
       } else {
         if (count >= 3 && prev) {
@@ -102,13 +132,21 @@ function getMatches(board) {
             matchedPositions.add(`${r - 1 - k}-${c}`);
           }
           total += count;
+          if (count >= 4) {
+            bonusSpecials.push({
+              row: r - 1,
+              col: c,
+              symbol: prev,
+              special: count >= 5 ? "cross" : "line",
+            });
+          }
         }
         count = 1;
       }
     }
   }
 
-  return { matchedPositions, total };
+  return { matchedPositions, total, bonusSpecials };
 }
 
 function swapCells(board, a, b) {
@@ -120,12 +158,13 @@ function swapCells(board, a, b) {
 }
 
 function dropBoard(board) {
-  const next = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+  const size = board.length;
+  const next = Array.from({ length: size }, () => Array(size).fill(null));
 
-  for (let c = 0; c < SIZE; c++) {
-    let writeRow = SIZE - 1;
+  for (let c = 0; c < size; c++) {
+    let writeRow = size - 1;
 
-    for (let r = SIZE - 1; r >= 0; r--) {
+    for (let r = size - 1; r >= 0; r--) {
       if (board[r][c]) {
         next[writeRow][c] = board[r][c];
         writeRow--;
@@ -174,9 +213,10 @@ function useSoundSystem() {
   return useMemo(() => ({ play, setVolume }), [play, setVolume]);
 }
 
-function Overlay({ children }) {
+function Overlay({ children, onClose }) {
   return (
     <div
+      onClick={onClose}
       style={{
         position: "absolute",
         inset: 0,
@@ -190,7 +230,7 @@ function Overlay({ children }) {
         boxSizing: "border-box",
       }}
     >
-      {children}
+      <div onClick={(e) => e.stopPropagation()}>{children}</div>
     </div>
   );
 }
@@ -388,7 +428,7 @@ function SplashScreen({ onStart, savedLevel }) {
           maxWidth: 430,
         }}
       >
-        Combine doces, faça combos em cadeia e avance de nível com uma experiência mais elegante e responsiva.
+        Combine doces, faça combos em cadeia e avance por fases cada vez mais desafiadoras.
       </p>
 
       <div
@@ -402,8 +442,6 @@ function SplashScreen({ onStart, savedLevel }) {
         }}
       >
         <SplashBadge label="Nível salvo" value={savedLevel} />
-        <SplashBadge label="Objetivo" value="Bater a meta" />
-        <SplashBadge label="Estilo" value="Match-3 premium" />
       </div>
 
       <PrimaryButton onClick={onStart} style={{ minWidth: 220, fontSize: 18, height: 58 }}>
@@ -441,11 +479,28 @@ function SettingsPanel({
   screen,
   onRestart,
   onQuit,
+  onClose,
 }) {
   return (
     <ModalCard width={320}>
-      <div style={{ color: "#4b2d7f", fontWeight: 900, fontSize: 24, marginBottom: 18 }}>
-        Configurações
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div style={{ color: "#4b2d7f", fontWeight: 900, fontSize: 24 }}>Configurações</div>
+        <button
+          onClick={onClose}
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 12,
+            border: "none",
+            cursor: "pointer",
+            background: "#f2ecff",
+            color: "#4b2d7f",
+            fontWeight: 800,
+            fontSize: 18,
+          }}
+        >
+          ×
+        </button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
@@ -544,12 +599,13 @@ function WinScreen({ level, score, goal, onNext }) {
 
 export default function CandyGame() {
   const [screen, setScreen] = useState("splash");
-  const [board, setBoard] = useState(createBoard());
+  const [level, setLevel] = useState(1);
+  const [boardSize, setBoardSize] = useState(getBoardSize(1));
+  const [board, setBoard] = useState(createBoard(getBoardSize(1)));
   const [selected, setSelected] = useState(null);
   const [score, setScore] = useState(0);
-  const [moves, setMoves] = useState(20);
-  const [level, setLevel] = useState(1);
-  const [goal, setGoal] = useState(300);
+  const [moves, setMoves] = useState(getMovesByLevel(1));
+  const [goal, setGoal] = useState(getGoalByLevel(1, getBoardSize(1)));
   const [showSettings, setShowSettings] = useState(false);
   const [volume, setVolume] = useState(0.4);
   const [isMuted, setIsMuted] = useState(false);
@@ -570,9 +626,15 @@ export default function CandyGame() {
   useEffect(() => {
     const saved = loadGame();
     if (saved) {
-      setLevel(saved.level || 1);
+      const savedLevel = saved.level || 1;
+      const savedSize = getBoardSize(savedLevel);
+      setLevel(savedLevel);
+      setBoardSize(savedSize);
       setVolume(saved.volume ?? 0.4);
       setIsMuted(saved.isMuted ?? false);
+      setGoal(getGoalByLevel(savedLevel, savedSize));
+      setMoves(getMovesByLevel(savedLevel));
+      setBoard(createBoard(savedSize));
     }
   }, []);
 
@@ -594,11 +656,13 @@ export default function CandyGame() {
   }, []);
 
   const startGame = useCallback(() => {
-    setBoard(createBoard());
+    const size = getBoardSize(level);
+    setBoardSize(size);
+    setBoard(createBoard(size));
     setSelected(null);
     setScore(0);
-    setMoves(20);
-    setGoal(300 + level * 200);
+    setMoves(getMovesByLevel(level));
+    setGoal(getGoalByLevel(level, size));
     setMatchedCells(new Set());
     setIsPaused(false);
     setShowSettings(false);
@@ -631,21 +695,34 @@ export default function CandyGame() {
       let chain = 0;
 
       while (true) {
-        const { matchedPositions, total } = getMatches(working);
+        const { matchedPositions, total, bonusSpecials } = getMatches(working);
         if (matchedPositions.size === 0) break;
 
         chain += 1;
-        setMatchedCells(new Set(matchedPositions));
+        const expanded = new Set(matchedPositions);
+
+        bonusSpecials.forEach((bonus) => {
+          if (bonus.special === "line") {
+            for (let c = 0; c < working.length; c++) expanded.add(`${bonus.row}-${c}`);
+            for (let r = 0; r < working.length; r++) expanded.add(`${r}-${bonus.col}`);
+          }
+          if (bonus.special === "cross") {
+            for (let c = 0; c < working.length; c++) expanded.add(`${bonus.row}-${c}`);
+            for (let r = 0; r < working.length; r++) expanded.add(`${r}-${bonus.col}`);
+          }
+        });
+
+        setMatchedCells(new Set(expanded));
         soundRef.current?.play("match");
 
-        const gained = total * 30 * chain;
+        const gained = (total + expanded.size - matchedPositions.size) * 30 * chain;
         setScore((prev) => prev + gained);
         showPoints(`+${gained}`);
 
         await new Promise((resolve) => setTimeout(resolve, CLEAR_MS));
 
         const cleared = cloneBoard(working);
-        matchedPositions.forEach((key) => {
+        expanded.forEach((key) => {
           const [r, c] = key.split("-").map(Number);
           cleared[r][c] = null;
         });
@@ -735,6 +812,8 @@ export default function CandyGame() {
     }
   }, [score, goal, screen]);
 
+  const boardPixelWidth = boardSize * 48 + (boardSize - 1) * 8 + 36;
+
   return (
     <div
       style={{
@@ -745,7 +824,8 @@ export default function CandyGame() {
         padding: 20,
         boxSizing: "border-box",
         position: "relative",
-        overflow: "hidden",
+        overflowX: "hidden",
+        overflowY: "auto",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -811,7 +891,7 @@ export default function CandyGame() {
       </div>
 
       {showSettings && (
-        <Overlay>
+        <Overlay onClose={() => setShowSettings(false)}>
           <SettingsPanel
             level={level}
             goal={goal}
@@ -824,6 +904,7 @@ export default function CandyGame() {
             screen={screen}
             onRestart={startGame}
             onQuit={quitToSplash}
+            onClose={() => setShowSettings(false)}
           />
         </Overlay>
       )}
@@ -831,10 +912,10 @@ export default function CandyGame() {
       {screen === "splash" && <SplashScreen onStart={startGame} savedLevel={level} />}
 
       {screen === "game" && (
-        <div style={{ width: "100%", maxWidth: 470, position: "relative" }}>
+        <div style={{ width: "100%", maxWidth: Math.max(470, boardPixelWidth), position: "relative" }}>
           <TopBar score={score} moves={moves} goal={goal} level={level} />
 
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", display: "flex", justifyContent: "center" }}>
             {floatingText && (
               <div
                 style={{
@@ -858,7 +939,7 @@ export default function CandyGame() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${SIZE}, 48px)`,
+                gridTemplateColumns: `repeat(${boardSize}, 48px)`,
                 gap: 8,
                 padding: 18,
                 borderRadius: 28,
@@ -868,6 +949,8 @@ export default function CandyGame() {
                 border: "1px solid rgba(255,255,255,0.16)",
                 justifyContent: "center",
                 position: "relative",
+                width: "fit-content",
+                margin: "0 auto",
               }}
             >
               {board.map((row, r) =>
@@ -927,7 +1010,7 @@ export default function CandyGame() {
                           transition: `transform ${CLEAR_MS}ms ease, filter ${CLEAR_MS}ms ease`,
                         }}
                       >
-                        {cell.symbol}
+                        {cell.special === "line" ? `✨${cell.symbol}` : cell.special === "cross" ? `💥${cell.symbol}` : cell.symbol}
                       </span>
                       <div
                         style={{
